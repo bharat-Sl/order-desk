@@ -63,8 +63,17 @@ function postgresStore(url: string): Store {
   const g = globalThis as unknown as { __sql?: postgres.Sql; __schema?: Promise<unknown> };
   const sql = (g.__sql ??= postgres(url, { prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} }));
 
-  const ready = () =>
-    (g.__schema ??= sql.unsafe(`
+  // Bump when the DDL below changes. A cold start then costs one quick version check instead of
+  // re-running every statement; the full script only runs on the first start after a change.
+  const SCHEMA_VERSION = 1;
+
+  async function migrate() {
+    const current = await sql`select value from app_meta where key = 'schema_version'`.then(
+      (r) => Number(r[0]?.value ?? 0),
+      () => 0 // app_meta doesn't exist yet
+    );
+    if (current >= SCHEMA_VERSION) return;
+    await sql.unsafe(`
       create table if not exists orders (
         id uuid primary key,
         customer_name text not null,
@@ -91,7 +100,14 @@ function postgresStore(url: string): Store {
       create index if not exists orders_archived_idx on orders (archived_at);
       create index if not exists orders_pickup_idx on orders (pickup_date, pickup_time);
       create index if not exists order_items_order_idx on order_items (order_id);
-    `).catch((e) => {
+      create table if not exists app_meta (key text primary key, value text not null);
+    `);
+    await sql`insert into app_meta (key, value) values ('schema_version', ${String(SCHEMA_VERSION)})
+              on conflict (key) do update set value = excluded.value`;
+  }
+
+  const ready = () =>
+    (g.__schema ??= migrate().catch((e) => {
       g.__schema = undefined;
       throw e;
     }));
@@ -108,27 +124,10 @@ function postgresStore(url: string): Store {
     archived_at: Date | null;
     created_at: Date;
     updated_at: Date;
+    items: { name: string; quantity: number | string; unit: string; unit_price: number | string; instructions: string }[];
   };
 
-  async function hydrate(rows: OrderRow[]): Promise<Order[]> {
-    if (rows.length === 0) return [];
-    const items = await sql<
-      { order_id: string; name: string; quantity: string; unit: string; unit_price: string; instructions: string }[]
-    >`select order_id, name, quantity, unit, unit_price, instructions
-      from order_items where order_id in ${sql(rows.map((r) => r.id))}
-      order by order_id, position`;
-    const byOrder = new Map<string, OrderItem[]>();
-    for (const i of items) {
-      const list = byOrder.get(i.order_id) ?? [];
-      list.push({
-        name: i.name,
-        quantity: Number(i.quantity),
-        unit: i.unit,
-        unitPrice: Number(i.unit_price),
-        instructions: i.instructions,
-      });
-      byOrder.set(i.order_id, list);
-    }
+  function hydrate(rows: OrderRow[]): Order[] {
     return rows.map((r) => {
       const discountValue = Number(r.discount_value);
       return {
@@ -138,7 +137,13 @@ function postgresStore(url: string): Store {
           pickupDate: r.pickup_date,
           pickupTime: r.pickup_time,
           notes: r.notes,
-          items: byOrder.get(r.id) ?? [],
+          items: r.items.map((i) => ({
+            name: i.name,
+            quantity: Number(i.quantity),
+            unit: i.unit,
+            unitPrice: Number(i.unit_price),
+            instructions: i.instructions,
+          })),
           discountType: r.discount_type,
           discountValue,
         }),
@@ -150,8 +155,12 @@ function postgresStore(url: string): Store {
     });
   }
 
-  const orderCols = sql`id, customer_name, pickup_date::text as pickup_date, pickup_time, notes, discount_type, discount_value,
-                       status, archived_at, created_at, updated_at`;
+  // Each order's items come back with it as JSON, so a page needs one query instead of two.
+  const orderCols = sql`o.id, o.customer_name, o.pickup_date::text as pickup_date, o.pickup_time, o.notes,
+    o.discount_type, o.discount_value, o.status, o.archived_at, o.created_at, o.updated_at,
+    coalesce((select json_agg(json_build_object('name', i.name, 'quantity', i.quantity, 'unit', i.unit,
+                'unit_price', i.unit_price, 'instructions', i.instructions) order by i.position)
+              from order_items i where i.order_id = o.id), '[]'::json) as items`;
 
   async function insertItems(tx: postgres.TransactionSql, orderId: string, items: OrderItem[]) {
     if (items.length === 0) return;
@@ -198,8 +207,8 @@ function postgresStore(url: string): Store {
     async getOrder(id) {
       await ready();
       if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-      const rows = await sql<OrderRow[]>`select ${orderCols} from orders where id = ${id}`;
-      return (await hydrate(rows))[0] ?? null;
+      const rows = await sql<OrderRow[]>`select ${orderCols} from orders o where o.id = ${id}`;
+      return hydrate(rows)[0] ?? null;
     },
 
     async createOrder(input) {
