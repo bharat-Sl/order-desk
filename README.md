@@ -10,7 +10,9 @@ A small admin panel for taking pick-up orders.
   (the customer's own last order first, otherwise the most recent order of that item)
 - The price is saved with each order, so later price changes never alter old orders
 - Orders list with Upcoming / Today / Past / All views, search, and date filter
-- Order detail page with print, edit and delete
+- Order status: Pending, Ready, Picked up or Cancelled, changeable from the list or the order page
+- Archive (soft delete) with restore; archived orders are deleted permanently after 30 days
+- Order detail page with print and edit
 - Password-protected admin access
 
 Built with Next.js 15 and Postgres. It runs on Vercel's free Hobby plan with a free Neon database.
@@ -24,6 +26,9 @@ Built with Next.js 15 and Postgres. It runs on Vercel's free Hobby plan with a f
 3. In **Settings → Environment Variables** add:
    - `ADMIN_PASSWORD`: the password used to sign in (required)
    - `NEXT_PUBLIC_CURRENCY`: optional, defaults to `INR` (₹)
+   - `CRON_SECRET`: any long random string. Vercel uses it to run the daily cleanup that permanently
+     deletes orders archived more than 30 days ago (see `vercel.json`). The cleanup also runs whenever the
+     orders list is opened, so it still happens if this is not set.
    - `NEXT_PUBLIC_TIMEZONE`: optional, defaults to `Asia/Kolkata`. This sets what counts as "today".
 4. Redeploy. Tables are created automatically on first use.
 

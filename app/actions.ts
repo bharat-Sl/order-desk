@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, adminPassword, isValidSession, sessionToken } from "@/lib/auth";
 import { TIME_SLOTS, lineTotal, round2 } from "@/lib/format";
-import type { OrderInput } from "@/lib/types";
+import { ORDER_STATUSES, type OrderInput, type OrderStatus } from "@/lib/types";
 
 async function assertAdmin() {
   const jar = await cookies();
@@ -69,11 +69,33 @@ export async function saveOrder(id: string | null, raw: OrderInput): Promise<{ e
   redirect(`/orders/${orderId}?saved=1`);
 }
 
-export async function deleteOrder(id: string) {
+export async function setOrderStatus(id: string, status: OrderStatus) {
   await assertAdmin();
-  await db().deleteOrder(id);
+  if (!ORDER_STATUSES.includes(status)) return;
+  await db().setStatus(id, status);
   revalidatePath("/", "layout");
-  redirect("/");
+}
+
+export async function archiveOrder(id: string) {
+  await assertAdmin();
+  await db().archiveOrder(id);
+  revalidatePath("/", "layout");
+  redirect("/?archived=1");
+}
+
+export async function restoreOrder(id: string) {
+  await assertAdmin();
+  await db().restoreOrder(id);
+  revalidatePath("/", "layout");
+}
+
+/** Permanent delete — only for orders that are already archived. */
+export async function deleteOrderForever(id: string) {
+  await assertAdmin();
+  const order = await db().getOrder(id);
+  if (order?.archivedAt) await db().deleteOrder(id);
+  revalidatePath("/", "layout");
+  redirect("/?view=archived");
 }
 
 export async function login(_prev: { error: string } | null, form: FormData) {

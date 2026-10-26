@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { formatDate, formatMoney, formatSlot, lineTotal } from "@/lib/format";
-import DeleteButton from "@/components/DeleteButton";
+import { ARCHIVE_RETENTION_DAYS } from "@/lib/types";
+import ArchiveControls from "@/components/ArchiveControls";
+import StatusButtons from "@/components/StatusButtons";
 import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +16,25 @@ export default async function OrderPage({ params, searchParams }: Props) {
   const { saved } = await searchParams;
   const order = await db().getOrder(id);
   if (!order) notFound();
+  const deletesOn =
+    order.archivedAt &&
+    new Date(new Date(order.archivedAt).getTime() + ARCHIVE_RETENTION_DAYS * 864e5).toLocaleDateString("en-US", {
+      dateStyle: "medium",
+    });
 
   return (
     <>
       {saved && <div className="alert alert-ok no-print">Order saved.</div>}
+      {deletesOn && (
+        <div className="alert alert-warn no-print">
+          This order is archived and will be deleted permanently on {deletesOn}. Restore it to keep it.
+        </div>
+      )}
       <div className="page-head">
         <div>
-          <Link href="/" className="small no-print">← Orders</Link>
+          <Link href={order.archivedAt ? "/?view=archived" : "/"} className="small no-print">
+            ← {order.archivedAt ? "Archived orders" : "Orders"}
+          </Link>
           <h1>{order.customerName}</h1>
           <div className="sub small">
             Order #{order.id.slice(0, 8).toUpperCase()} · created{" "}
@@ -29,10 +43,19 @@ export default async function OrderPage({ params, searchParams }: Props) {
         </div>
         <div className="actions no-print">
           <PrintButton />
-          <Link href={`/orders/${order.id}/edit`} className="btn">Edit</Link>
-          <DeleteButton id={order.id} />
+          {!order.archivedAt && (
+            <Link href={`/orders/${order.id}/edit`} className="btn">Edit</Link>
+          )}
+          <ArchiveControls id={order.id} archived={Boolean(order.archivedAt)} />
         </div>
       </div>
+
+      {!order.archivedAt && (
+        <div className="status-bar no-print">
+          <span className="muted small">Status</span>
+          <StatusButtons id={order.id} status={order.status} />
+        </div>
+      )}
 
       <div className="card card-pad">
         <div className="meta">

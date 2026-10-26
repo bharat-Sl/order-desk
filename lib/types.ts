@@ -6,6 +6,19 @@ export type OrderItem = {
   instructions: string;
 };
 
+export const ORDER_STATUSES = ["pending", "ready", "picked_up", "cancelled"] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+export const STATUS_LABELS: Record<OrderStatus, string> = {
+  pending: "Pending",
+  ready: "Ready",
+  picked_up: "Picked up",
+  cancelled: "Cancelled",
+};
+
+/** Archived orders are permanently deleted after this many days. */
+export const ARCHIVE_RETENTION_DAYS = 30;
+
 export type Order = {
   id: string;
   customerName: string;
@@ -18,11 +31,16 @@ export type Order = {
   subtotal: number;
   discount: number; // discount in money
   total: number;
+  status: OrderStatus;
+  archivedAt: string | null; // set when soft-deleted
   createdAt: string;
   updatedAt: string;
 };
 
-export type OrderInput = Omit<Order, "id" | "subtotal" | "discount" | "total" | "createdAt" | "updatedAt">;
+export type OrderInput = Omit<
+  Order,
+  "id" | "subtotal" | "discount" | "total" | "status" | "archivedAt" | "createdAt" | "updatedAt"
+>;
 
 /** Most recent price/unit/quantity seen for an item, optionally for one customer. */
 export type ItemHistory = {
@@ -35,7 +53,8 @@ export type ItemHistory = {
 };
 
 export type OrderFilter = {
-  view: "upcoming" | "today" | "past" | "all";
+  view: "upcoming" | "today" | "past" | "all" | "archived";
+  status?: OrderStatus;
   q?: string;
   date?: string;
 };

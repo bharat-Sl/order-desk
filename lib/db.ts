@@ -3,7 +3,8 @@ import postgres from "postgres";
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import type { ItemHistory, Order, OrderFilter, OrderInput, OrderItem } from "./types";
+import { ARCHIVE_RETENTION_DAYS } from "./types";
+import type { ItemHistory, Order, OrderFilter, OrderInput, OrderItem, OrderStatus } from "./types";
 import { round2, todayISO, totals } from "./format";
 
 export type Stats = { todayCount: number; upcomingCount: number; upcomingValue: number };
@@ -13,7 +14,14 @@ interface Store {
   getOrder(id: string): Promise<Order | null>;
   createOrder(input: OrderInput): Promise<string>;
   updateOrder(id: string, input: OrderInput): Promise<void>;
+  setStatus(id: string, status: OrderStatus): Promise<void>;
+  /** Soft delete: hides the order everywhere except the Archived view. */
+  archiveOrder(id: string): Promise<void>;
+  restoreOrder(id: string): Promise<void>;
+  /** Permanent delete. */
   deleteOrder(id: string): Promise<void>;
+  /** Permanently deletes orders archived more than ARCHIVE_RETENTION_DAYS ago; returns how many. */
+  purgeArchived(): Promise<number>;
   /** Latest entry per item (customerName = null) and per customer + item. */
   itemHistory(): Promise<ItemHistory[]>;
   customerNames(): Promise<string[]>;
@@ -25,6 +33,8 @@ function withTotals(input: OrderInput) {
 }
 
 function matchesFilter(o: Order, f: OrderFilter, today: string) {
+  if ((f.view === "archived") !== Boolean(o.archivedAt)) return false;
+  if (f.status && o.status !== f.status) return false;
   if (f.view === "upcoming" && o.pickupDate < today) return false;
   if (f.view === "today" && o.pickupDate !== today) return false;
   if (f.view === "past" && o.pickupDate >= today) return false;
@@ -39,6 +49,7 @@ function matchesFilter(o: Order, f: OrderFilter, today: string) {
 }
 
 function sortOrders(orders: Order[], f: OrderFilter) {
+  if (f.view === "archived") return orders.sort((a, b) => (a.archivedAt! < b.archivedAt! ? 1 : -1));
   const key = (o: Order) => `${o.pickupDate} ${o.pickupTime ?? "99:99"}`;
   const dir = f.view === "past" || f.view === "all" ? -1 : 1;
   return orders.sort((a, b) => (key(a) < key(b) ? -dir : key(a) > key(b) ? dir : 0));
@@ -50,7 +61,7 @@ function sortOrders(orders: Order[], f: OrderFilter) {
 
 function postgresStore(url: string): Store {
   const g = globalThis as unknown as { __sql?: postgres.Sql; __schema?: Promise<unknown> };
-  const sql = (g.__sql ??= postgres(url, { prepare: false, max: 5, idle_timeout: 20 }));
+  const sql = (g.__sql ??= postgres(url, { prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} }));
 
   const ready = () =>
     (g.__schema ??= sql.unsafe(`
@@ -75,6 +86,9 @@ function postgresStore(url: string): Store {
       );
       alter table orders add column if not exists discount_type text not null default 'amount';
       alter table orders add column if not exists discount_value numeric(12,2) not null default 0;
+      alter table orders add column if not exists status text not null default 'pending';
+      alter table orders add column if not exists archived_at timestamptz;
+      create index if not exists orders_archived_idx on orders (archived_at);
       create index if not exists orders_pickup_idx on orders (pickup_date, pickup_time);
       create index if not exists order_items_order_idx on order_items (order_id);
     `).catch((e) => {
@@ -90,6 +104,8 @@ function postgresStore(url: string): Store {
     notes: string;
     discount_type: "amount" | "percent";
     discount_value: string;
+    status: OrderStatus;
+    archived_at: Date | null;
     created_at: Date;
     updated_at: Date;
   };
@@ -126,13 +142,16 @@ function postgresStore(url: string): Store {
           discountType: r.discount_type,
           discountValue,
         }),
+        status: r.status,
+        archivedAt: r.archived_at ? r.archived_at.toISOString() : null,
         createdAt: r.created_at.toISOString(),
         updatedAt: r.updated_at.toISOString(),
       };
     });
   }
 
-  const orderCols = sql`id, customer_name, pickup_date::text as pickup_date, pickup_time, notes, discount_type, discount_value, created_at, updated_at`;
+  const orderCols = sql`id, customer_name, pickup_date::text as pickup_date, pickup_time, notes, discount_type, discount_value,
+                       status, archived_at, created_at, updated_at`;
 
   async function insertItems(tx: postgres.TransactionSql, orderId: string, items: OrderItem[]) {
     if (items.length === 0) return;
@@ -155,7 +174,8 @@ function postgresStore(url: string): Store {
       const q = f.q ? `%${f.q}%` : null;
       const rows = await sql<OrderRow[]>`
         select ${orderCols} from orders o
-        where true
+        where ${f.view === "archived" ? sql`archived_at is not null` : sql`archived_at is null`}
+          ${f.status ? sql`and status = ${f.status}` : sql``}
           ${f.view === "upcoming" ? sql`and pickup_date >= ${today}` : sql``}
           ${f.view === "today" ? sql`and pickup_date = ${today}` : sql``}
           ${f.view === "past" ? sql`and pickup_date < ${today}` : sql``}
@@ -166,8 +186,11 @@ function postgresStore(url: string): Store {
                   select 1 from order_items i where i.order_id = o.id and i.name ilike ${q}))`
               : sql``
           }
-        order by pickup_date ${f.view === "past" || f.view === "all" ? sql`desc` : sql`asc`},
-                 pickup_time asc nulls last
+        order by ${
+          f.view === "archived"
+            ? sql`archived_at desc`
+            : sql`pickup_date ${f.view === "past" || f.view === "all" ? sql`desc` : sql`asc`}, pickup_time asc nulls last`
+        }
         limit 500`;
       return hydrate(rows);
     },
@@ -203,9 +226,31 @@ function postgresStore(url: string): Store {
       });
     },
 
+    async setStatus(id, status) {
+      await ready();
+      await sql`update orders set status = ${status}, updated_at = now() where id = ${id}`;
+    },
+
+    async archiveOrder(id) {
+      await ready();
+      await sql`update orders set archived_at = now() where id = ${id} and archived_at is null`;
+    },
+
+    async restoreOrder(id) {
+      await ready();
+      await sql`update orders set archived_at = null where id = ${id}`;
+    },
+
     async deleteOrder(id) {
       await ready();
       await sql`delete from orders where id = ${id}`;
+    },
+
+    async purgeArchived() {
+      await ready();
+      const rows = await sql`delete from orders
+        where archived_at < now() - make_interval(days => ${ARCHIVE_RETENTION_DAYS}) returning id`;
+      return rows.length;
     },
 
     async itemHistory() {
@@ -247,7 +292,7 @@ function postgresStore(url: string): Store {
           select o.pickup_date, o.discount_type, o.discount_value,
                  coalesce(sum(round(i.quantity * i.unit_price, 2)), 0) as sub
             from orders o left join order_items i on i.order_id = o.id
-           where o.pickup_date >= ${today}
+           where o.pickup_date >= ${today} and o.archived_at is null and o.status <> 'cancelled'
            group by o.id)
         select
           count(*) filter (where pickup_date = ${today})::int as today_count,
@@ -297,7 +342,7 @@ function fileStore(): Store {
       const orders = await load();
       const now = new Date().toISOString();
       const id = randomUUID();
-      orders.push({ ...withTotals(input), id, createdAt: now, updatedAt: now });
+      orders.push({ ...withTotals(input), id, status: "pending", archivedAt: null, createdAt: now, updatedAt: now });
       await save(orders);
       return id;
     },
@@ -308,8 +353,33 @@ function fileStore(): Store {
       Object.assign(o, withTotals(input), { updatedAt: new Date().toISOString() });
       await save(orders);
     },
+    async setStatus(id, status) {
+      const orders = await load();
+      const o = orders.find((x) => x.id === id);
+      if (o) Object.assign(o, { status, updatedAt: new Date().toISOString() });
+      await save(orders);
+    },
+    async archiveOrder(id) {
+      const orders = await load();
+      const o = orders.find((x) => x.id === id);
+      if (o && !o.archivedAt) o.archivedAt = new Date().toISOString();
+      await save(orders);
+    },
+    async restoreOrder(id) {
+      const orders = await load();
+      const o = orders.find((x) => x.id === id);
+      if (o) o.archivedAt = null;
+      await save(orders);
+    },
     async deleteOrder(id) {
       await save((await load()).filter((o) => o.id !== id));
+    },
+    async purgeArchived() {
+      const cutoff = new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 864e5).toISOString();
+      const orders = await load();
+      const keep = orders.filter((o) => !o.archivedAt || o.archivedAt >= cutoff);
+      if (keep.length !== orders.length) await save(keep);
+      return orders.length - keep.length;
     },
     async itemHistory() {
       const seen = new Map<string, ItemHistory>();
@@ -340,7 +410,7 @@ function fileStore(): Store {
     },
     async stats() {
       const today = todayISO();
-      const orders = await load();
+      const orders = (await load()).filter((o) => !o.archivedAt && o.status !== "cancelled");
       const upcoming = orders.filter((o) => o.pickupDate >= today);
       return {
         todayCount: orders.filter((o) => o.pickupDate === today).length,
@@ -352,6 +422,18 @@ function fileStore(): Store {
 }
 
 let store: Store | null = null;
+let lastPurge = 0;
+
+/** Runs the 30-day archive purge at most every 10 minutes per server instance. */
+export async function purgeIfDue() {
+  if (Date.now() - lastPurge < 10 * 60 * 1000) return;
+  lastPurge = Date.now();
+  try {
+    await db().purgeArchived();
+  } catch (e) {
+    console.error("Archive purge failed", e);
+  }
+}
 
 export function db(): Store {
   if (store) return store;
