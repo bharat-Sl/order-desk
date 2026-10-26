@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { db, purgeIfDue } from "@/lib/db";
 import { formatDate, formatMoney, formatSlot, todayISO } from "@/lib/format";
 import {
@@ -31,7 +32,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const view = (VIEWS.find((v) => v.key === sp.view)?.key ?? "upcoming") as OrderFilter["view"];
   const status = ORDER_STATUSES.find((s) => s === sp.status) as OrderStatus | undefined;
   const filter: OrderFilter = { view, status, q: sp.q?.trim() || undefined, date: sp.date || undefined };
-  await purgeIfDue();
+  // Run the 30-day archive cleanup after the page is sent, so it never delays loading.
+  after(purgeIfDue);
   const [orders, stats] = await Promise.all([db().listOrders(filter), db().stats()]);
   const today = todayISO();
 

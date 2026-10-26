@@ -37,6 +37,10 @@ Built with Next.js 15 and Postgres. It runs on Vercel's free Hobby plan with a f
    - `NEXT_PUBLIC_TIMEZONE`: optional, defaults to `Asia/Kolkata`. This sets what counts as "today".
 4. Redeploy. Tables are created automatically on first use.
 
+Keep the server next to the database: `vercel.json` pins the app's server functions to `sin1` (Singapore)
+because the Neon database is in AWS ap-southeast-1 (Singapore). If the database ever moves, change
+`regions` to the matching Vercel region, otherwise every database query crosses continents.
+
 ## Printing receipts on a thermal printer
 
 Receipts are laid out for 80mm paper and printed through the browser, so any computer with the
