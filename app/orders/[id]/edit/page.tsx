@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { todayISO } from "@/lib/format";
 import OrderForm from "@/components/OrderForm";
@@ -14,6 +14,7 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
     db().itemHistory(),
   ]);
   if (!order) notFound();
+  if (order.archivedAt) redirect(`/orders/${order.id}`);
   return (
     <>
       <div className="page-head">
