@@ -53,7 +53,7 @@ function validate(raw: OrderInput): { input?: OrderInput; error?: string } {
   return { input: { customerName, pickupDate, pickupTime, notes, items, discountType, discountValue } };
 }
 
-export async function saveOrder(id: string | null, raw: OrderInput): Promise<{ error: string }> {
+export async function saveOrder(id: string | null, raw: OrderInput, printAfter = false): Promise<{ error: string }> {
   await assertAdmin();
   const { input, error } = validate(raw);
   if (!input) return { error: error! };
@@ -66,7 +66,7 @@ export async function saveOrder(id: string | null, raw: OrderInput): Promise<{ e
     return { error: "Could not save the order. Please try again." };
   }
   revalidatePath("/", "layout");
-  redirect(`/orders/${orderId}?saved=1`);
+  redirect(`/orders/${orderId}?saved=1${printAfter ? "&print=1" : ""}`);
 }
 
 export async function setOrderStatus(id: string, status: OrderStatus) {

@@ -12,6 +12,7 @@ import {
 import RowLink from "@/components/RowLink";
 import StatusSelect from "@/components/StatusSelect";
 import ArchiveControls from "@/components/ArchiveControls";
+import PrintReceiptButton from "@/components/PrintReceiptButton";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
 
   const groups = new Map<string, Order[]>();
   for (const o of orders) groups.set(o.pickupDate, [...(groups.get(o.pickupDate) ?? []), o]);
+
+  const printQuery = new URLSearchParams({ view });
+  if (filter.q) printQuery.set("q", filter.q);
+  if (filter.status) printQuery.set("status", filter.status);
+  if (filter.date) printQuery.set("date", filter.date);
 
   const viewHref = (key: string) => {
     const p = new URLSearchParams({ view: key });
@@ -107,6 +113,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               </Link>
             )}
           </form>
+          {view !== "archived" && orders.length > 0 && (
+            <PrintReceiptButton query={printQuery.toString()} label={`Print all (${orders.length})`} />
+          )}
         </div>
 
         {view === "archived" && (
@@ -136,6 +145,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 <th className="hide-sm">Items</th>
                 <th style={{ width: 130 }}>Status</th>
                 <th className="num">Total</th>
+                <th className="c-print" />
               </tr>
             </thead>
             <tbody>
@@ -155,7 +165,7 @@ function Group({ date, today, orders }: { date: string; today: string; orders: O
   return (
     <>
       <tr className="date-group">
-        <td colSpan={5}>
+        <td colSpan={6}>
           {formatDate(date)} {date === today && <span className="pill">Today</span>}{" "}
           <span className="muted">
             · {orders.length} order{orders.length === 1 ? "" : "s"}
@@ -187,6 +197,9 @@ function Group({ date, today, orders }: { date: string; today: string; orders: O
           </td>
           <td className="num">
             <strong>{formatMoney(o.total)}</strong>
+          </td>
+          <td className="c-print">
+            <PrintReceiptButton query={`id=${o.id}`} label="Print" className="btn btn-sm" />
           </td>
         </RowLink>
       ))}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { saveOrder } from "@/app/actions";
 import {
@@ -36,6 +36,7 @@ type Props = {
 };
 
 let nextKey = 1;
+const PRINT_PREF = "od_print_after_save";
 
 function emptyRow(): Row {
   return {
@@ -86,6 +87,18 @@ export default function OrderForm({ order, customers, history, today }: Props) {
       : [emptyRow()]
   );
   const [focusKey, setFocusKey] = useState<number | null>(null);
+  const [printAfter, setPrintAfter] = useState(false);
+  useEffect(() => {
+    try {
+      setPrintAfter(localStorage.getItem(PRINT_PREF) === "1");
+    } catch {}
+  }, []);
+  function togglePrintAfter(on: boolean) {
+    setPrintAfter(on);
+    try {
+      localStorage.setItem(PRINT_PREF, on ? "1" : "0");
+    } catch {}
+  }
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -162,7 +175,7 @@ export default function OrderForm({ order, customers, history, today }: Props) {
           unitPrice: Number(r.unitPrice),
           instructions: r.instructions,
         })),
-      });
+      }, printAfter);
       if (res?.error) {
         setError(res.error);
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -322,6 +335,10 @@ export default function OrderForm({ order, customers, history, today }: Props) {
           {customerName.trim() || "New order"} · {pickupDate ? formatDate(pickupDate) : "No date"} ·{" "}
           {formatSlot(pickupTime || null)} · <strong>{formatMoney(sums.total)}</strong>
         </span>
+        <label className="print-after">
+          <input type="checkbox" checked={printAfter} onChange={(e) => togglePrintAfter(e.target.checked)} />
+          Print receipt after saving
+        </label>
         <Link href={order ? `/orders/${order.id}` : "/"} className="btn">
           Cancel
         </Link>

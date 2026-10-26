@@ -5,15 +5,15 @@ import { formatDate, formatMoney, formatSlot, lineTotal } from "@/lib/format";
 import { ARCHIVE_RETENTION_DAYS } from "@/lib/types";
 import ArchiveControls from "@/components/ArchiveControls";
 import StatusButtons from "@/components/StatusButtons";
-import PrintButton from "@/components/PrintButton";
+import PrintReceiptButton from "@/components/PrintReceiptButton";
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string }> };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; print?: string }> };
 
 export default async function OrderPage({ params, searchParams }: Props) {
   const { id } = await params;
-  const { saved } = await searchParams;
+  const { saved, print } = await searchParams;
   const order = await db().getOrder(id);
   if (!order) notFound();
   const deletesOn =
@@ -42,7 +42,14 @@ export default async function OrderPage({ params, searchParams }: Props) {
           </div>
         </div>
         <div className="actions no-print">
-          <PrintButton />
+          <PrintReceiptButton
+            query={`id=${order.id}`}
+            className="btn btn-primary"
+            auto={print === "1" && !order.archivedAt}
+          />
+          <Link href={`/receipts?id=${order.id}`} className="btn btn-ghost">
+            Preview
+          </Link>
           {!order.archivedAt && (
             <Link href={`/orders/${order.id}/edit`} className="btn">Edit</Link>
           )}
