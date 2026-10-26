@@ -12,7 +12,9 @@ A small admin panel for taking pick-up orders.
 - Orders list with Upcoming / Today / Past / All views, search, and date filter
 - Order status: Pending, Ready, Picked up or Cancelled, changeable from the list or the order page
 - Archive (soft delete) with restore; archived orders are deleted permanently after 30 days
-- Order detail page with print and edit
+- 80mm thermal receipts (e.g. Helett H80i): print one order, every order in the current list, or
+  automatically after saving an order
+- Order detail page with edit
 - Password-protected admin access
 
 Built with Next.js 15 and Postgres. It runs on Vercel's free Hobby plan with a free Neon database.
@@ -29,8 +31,54 @@ Built with Next.js 15 and Postgres. It runs on Vercel's free Hobby plan with a f
    - `CRON_SECRET`: any long random string. Vercel uses it to run the daily cleanup that permanently
      deletes orders archived more than 30 days ago (see `vercel.json`). The cleanup also runs whenever the
      orders list is opened, so it still happens if this is not set.
+   - Receipt header, all optional: `NEXT_PUBLIC_SHOP_NAME`, `NEXT_PUBLIC_SHOP_ADDRESS`, `NEXT_PUBLIC_SHOP_PHONE`,
+     `NEXT_PUBLIC_SHOP_FSSAI`, `NEXT_PUBLIC_SHOP_GSTIN` and `NEXT_PUBLIC_RECEIPT_TITLE`. The defaults are in
+     `lib/shop.ts`; set a variable to an empty value to hide that line.
    - `NEXT_PUBLIC_TIMEZONE`: optional, defaults to `Asia/Kolkata`. This sets what counts as "today".
 4. Redeploy. Tables are created automatically on first use.
+
+## Printing receipts on a thermal printer
+
+Receipts are laid out for 80mm paper and printed through the browser, so any computer with the
+printer's Windows driver installed (it shows up as **POS80** for the Helett H80i) can print. Each
+receipt is placed at the top of one of the driver's own 80mm sheets (210mm, 297mm or the long roll,
+whichever fits) and the driver skips the unused rest, so every receipt comes out at its own length.
+It ends with a small dot about 8mm below "Thank You!" so that space isn't trimmed. **Print all**
+puts every receipt on its own page so the printer cuts between them. The shop details at the top
+come from `lib/shop.ts`.
+
+Where to print from:
+
+- **Print receipt** on an order's page (**Preview** shows it on screen first)
+- **Print** on any row of the orders list
+- **Print all** next to the filters, for every order in the current view
+- **Print receipt after saving** checkbox on the order form (remembered per browser)
+
+First-time setup in Chrome or Edge:
+
+1. Click any print button. In the print dialog choose **POS80** as the destination, then under
+   *More settings* set **Margins: None** and **Scale: Default**. The browser remembers these.
+2. In Windows, **Printers & scanners → POS80 → Printing preferences → Page Settings**, under
+   *Print Options* set:
+   - **Page End: Ignore page tails blank** (otherwise every receipt runs out to the full sheet length)
+   - **Cutting: After one page**
+   - **Feed after: Feed 3x3.75mm** (space fed before the cut; raise it for more space at the bottom)
+3. Under **Printer properties → Advanced**, choose **Start printing after last page is spooled**.
+   Without it the printer can stop partway through a receipt.
+
+### One-click printing (no print dialog)
+
+Chrome and Edge can skip the print dialog and send straight to the printer:
+
+1. Make **POS80** your Windows default printer, or print once through the dialog with POS80 selected.
+2. Create a desktop shortcut whose target is:
+
+   ```
+   "C:Program Files (x86)MicrosoftEdgeApplicationmsedge.exe" --kiosk-printing https://your-app.vercel.app
+   ```
+
+3. Always open the order desk from that shortcut (close other Edge windows first, since the flag only
+   applies when the browser starts).
 
 ## Run locally
 
