@@ -256,3 +256,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .c-print { width: 72px; text-align: right; }
 .print-after { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .print-after input { width: auto; margin: 0; }
+
+/* Item totals */
+.inline-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.r-day { font-weight: 700; font-size: 13px; text-transform: uppercase; margin: 2px 0 3px; }

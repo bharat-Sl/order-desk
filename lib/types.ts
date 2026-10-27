@@ -52,6 +52,22 @@ export type ItemHistory = {
   orderedAt: string;
 };
 
+/** One item's totals across the orders picked up on one day. */
+export type ItemTotalRow = {
+  date: string; // YYYY-MM-DD pick-up date
+  name: string;
+  unit: string;
+  quantity: number;
+  orders: number;
+  amount: number; // sum of line amounts, before order-level discounts
+};
+
+export type ItemTotals = {
+  rows: ItemTotalRow[];
+  /** Orders (not cancelled or archived) picked up on each day in the range. */
+  orderCounts: { date: string; orders: number }[];
+};
+
 export type OrderFilter = {
   view: "upcoming" | "today" | "past" | "all" | "archived";
   status?: OrderStatus;

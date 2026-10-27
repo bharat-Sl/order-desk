@@ -14,6 +14,8 @@ A small admin panel for taking pick-up orders.
 - Archive (soft delete) with restore; archived orders are deleted permanently after 30 days
 - 80mm thermal receipts (e.g. Helett H80i): print one order, every order in the current list, or
   automatically after saving an order
+- Item totals: the total quantity of every item to prepare for a pick-up day or date range,
+  optionally split by day, printable on the 80mm receipt printer
 - Order detail page with edit
 - Password-protected admin access
 
@@ -69,6 +71,16 @@ First-time setup in Chrome or Edge:
    - **Feed after: Feed 3x3.75mm** (space fed before the cut; raise it for more space at the bottom)
 3. Under **Printer properties → Advanced**, choose **Start printing after last page is spooled**.
    Without it the printer can stop partway through a receipt.
+
+### Item totals
+
+**Item totals** in the top bar lists every item in the orders picked up on a day or across a date
+range (Today, Tomorrow, Next 7 days, Yesterday, or any From/To dates), with the total quantity,
+number of orders and value. Tick **Split by day** to see each day separately, followed by the
+combined totals. **Print totals** prints the same list on the 80mm printer.
+
+Cancelled and archived orders are not counted, values are before order-level discounts, and the
+same item in different units (for example kg and g) is listed on separate lines.
 
 ### One-click printing (no print dialog)
 

@@ -1,27 +1,6 @@
-import { formatDate, formatMoney, formatSlot, lineTotal } from "@/lib/format";
+import { formatDate, formatMoney, formatSlot, formatStamp as stamp, lineTotal } from "@/lib/format";
 import { STATUS_LABELS, type Order } from "@/lib/types";
 import { SHOP } from "@/lib/shop";
-
-const TZ = process.env.NEXT_PUBLIC_TIMEZONE || "Asia/Kolkata";
-
-/** "27/10/2026 00:51:27" in the shop's time zone, matching the shop's billing receipts. */
-function stamp(d: Date, withSeconds = true) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: TZ,
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(d)
-      .map((x) => [x.type, x.value])
-  );
-  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}${withSeconds ? `:${p.second}` : ""}`;
-}
 
 /** One 80mm thermal receipt. Black-only text: thermal heads render grey poorly. */
 export default function Receipt({ order, index }: { order: Order; index: number }) {
