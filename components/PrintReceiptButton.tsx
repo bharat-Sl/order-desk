@@ -2,15 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 
-/** Prints /receipts?{query} through a hidden iframe, so the current page stays put. */
-export function printReceipts(query: string, onDone?: () => void) {
+/** Prints {path}?{query} (default: order receipts) through a hidden iframe, so the current page stays put. */
+export function printReceipts(query: string, onDone?: () => void, path = "/receipts") {
   document.getElementById("receipt-frame")?.remove();
   const frame = document.createElement("iframe");
   frame.id = "receipt-frame";
   frame.setAttribute("aria-hidden", "true");
   // Off-screen but laid out at receipt width, so heights measure correctly.
   frame.style.cssText = "position:fixed;left:-10000px;top:0;width:80mm;height:600px;border:0;";
-  frame.src = `/receipts?${query}&autoprint=1`;
+  frame.src = `${path}?${query}&autoprint=1`;
   frame.addEventListener("load", () => {
     frame.contentWindow?.addEventListener("afterprint", () => {
       onDone?.();
@@ -22,19 +22,27 @@ export function printReceipts(query: string, onDone?: () => void) {
 
 type Props = {
   query: string;
+  /** Page that renders the 80mm slip(s); defaults to order receipts. */
+  path?: string;
   label?: string;
   className?: string;
   /** Print once as soon as the component mounts (used after saving an order). */
   auto?: boolean;
 };
 
-export default function PrintReceiptButton({ query, label = "Print receipt", className = "btn", auto }: Props) {
+export default function PrintReceiptButton({
+  query,
+  path = "/receipts",
+  label = "Print receipt",
+  className = "btn",
+  auto,
+}: Props) {
   const [busy, setBusy] = useState(false);
   const fired = useRef(false);
 
   const print = () => {
     setBusy(true);
-    printReceipts(query, () => setBusy(false));
+    printReceipts(query, () => setBusy(false), path);
     setTimeout(() => setBusy(false), 8000);
   };
 

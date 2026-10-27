@@ -4,8 +4,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { ARCHIVE_RETENTION_DAYS } from "./types";
-import type { ItemHistory, Order, OrderFilter, OrderInput, OrderItem, OrderStatus } from "./types";
-import { round2, todayISO, totals } from "./format";
+import type { ItemHistory, ItemTotals, Order, OrderFilter, OrderInput, OrderItem, OrderStatus } from "./types";
+import { lineTotal, round2, todayISO, totals } from "./format";
 
 export type Stats = { todayCount: number; upcomingCount: number; upcomingValue: number };
 
@@ -26,6 +26,8 @@ interface Store {
   itemHistory(): Promise<ItemHistory[]>;
   customerNames(): Promise<string[]>;
   stats(): Promise<Stats>;
+  /** Per-day item totals for orders picked up from `from` to `to` (inclusive), excluding cancelled/archived. */
+  itemTotals(from: string, to: string): Promise<ItemTotals>;
 }
 
 function withTotals(input: OrderInput) {
@@ -316,6 +318,40 @@ function postgresStore(url: string): Store {
         upcomingValue: round2(Number(r.upcoming_value ?? 0)),
       };
     },
+
+    async itemTotals(from, to) {
+      await ready();
+      // One query: per-day item lines plus per-day order counts (kind = 'item' | 'count').
+      const rows = await sql<
+        { kind: "item" | "count"; date: string; name: string | null; unit: string | null; quantity: string | null; orders: number; amount: string | null }[]
+      >`
+        with o as (
+          select id, pickup_date from orders
+           where archived_at is null and status <> 'cancelled' and pickup_date between ${from} and ${to}
+        )
+        select 'count' as kind, pickup_date::text as date, null::text as name, null::text as unit,
+               null::numeric as quantity, count(*)::int as orders, null::numeric as amount
+          from o group by pickup_date
+        union all
+        select 'item', o.pickup_date::text, min(i.name), i.unit, sum(i.quantity),
+               count(distinct o.id)::int, sum(round(i.quantity * i.unit_price, 2))
+          from order_items i join o on o.id = i.order_id
+         group by o.pickup_date, lower(i.name), i.unit
+         order by date, name nulls first, unit`;
+      return {
+        rows: rows
+          .filter((r) => r.kind === "item")
+          .map((r) => ({
+            date: r.date,
+            name: r.name!,
+            unit: r.unit!,
+            quantity: Number(r.quantity),
+            orders: r.orders,
+            amount: round2(Number(r.amount)),
+          })),
+        orderCounts: rows.filter((r) => r.kind === "count").map((r) => ({ date: r.date, orders: r.orders })),
+      };
+    },
   };
 }
 
@@ -425,6 +461,31 @@ function fileStore(): Store {
         todayCount: orders.filter((o) => o.pickupDate === today).length,
         upcomingCount: upcoming.length,
         upcomingValue: round2(upcoming.reduce((s, o) => s + o.total, 0)),
+      };
+    },
+    async itemTotals(from, to) {
+      const orders = (await load()).filter(
+        (o) => !o.archivedAt && o.status !== "cancelled" && o.pickupDate >= from && o.pickupDate <= to
+      );
+      const rows = new Map<string, ItemTotals["rows"][number] & { ids: Set<string> }>();
+      const counts = new Map<string, number>();
+      for (const o of orders) {
+        counts.set(o.pickupDate, (counts.get(o.pickupDate) ?? 0) + 1);
+        for (const i of o.items) {
+          const key = `${o.pickupDate}|${i.name.toLowerCase()}|${i.unit}`;
+          const r = rows.get(key) ?? { date: o.pickupDate, name: i.name, unit: i.unit, quantity: 0, orders: 0, amount: 0, ids: new Set() };
+          r.quantity += i.quantity;
+          r.amount = round2(r.amount + lineTotal(i.quantity, i.unitPrice));
+          r.ids.add(o.id);
+          r.orders = r.ids.size;
+          rows.set(key, r);
+        }
+      }
+      return {
+        rows: [...rows.values()]
+          .map(({ ids: _ids, ...r }) => r)
+          .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name) || a.unit.localeCompare(b.unit)),
+        orderCounts: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([date, orders]) => ({ date, orders })),
       };
     },
   };

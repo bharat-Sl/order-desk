@@ -58,6 +58,30 @@ function toLabel(h: number, m: number) {
   return `${h12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
+/** Quantity without trailing zeros: 1.5, 0.25, 12. */
+export function formatQty(n: number) {
+  return String(Number((n || 0).toFixed(3)));
+}
+
+/** "27/10/2026 00:51:27" in the shop's time zone, matching the shop's billing receipts. */
+export function formatStamp(d: Date, withSeconds = true) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: process.env.NEXT_PUBLIC_TIMEZONE || "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(d)
+      .map((x) => [x.type, x.value])
+  );
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}${withSeconds ? `:${p.second}` : ""}`;
+}
+
 export function formatDate(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-US", {
